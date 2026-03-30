@@ -1,0 +1,8 @@
+flask
+twilio
+openai
+gspread
+google-auth
+google-auth-oauthlib
+httpx
+python-dotenv
