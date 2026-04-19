@@ -32,7 +32,7 @@ estados = {}
 CATEGORIAS_VALIDAS = [
     "Alimentación", "Amigos", "Caridad", "Dios", "Familia",
     "Gastos hormiga", "Gastos innecesario", "Gustos", "Inversión en mí",
-    "Pago servicio", "Pasajes", "Perrihijos", "Salidas", "Suscripciones"
+    "Pago servicio", "Perrihijos", "Salidas", "Suscripciones"
 ]
 
 METODOS_VALIDOS = [
@@ -61,34 +61,16 @@ def get_sheet(nombre_hoja):
 # PROMPTS
 # -------------------------------------------------------
 
-def get_prompt_egreso():
-    hoy = datetime.now()
-    dias_es = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
-    dia_semana = dias_es[hoy.weekday()]
-    
-    return f"""Eres un asistente que extrae datos de egresos (gastos y pasajes) personales en Perú.
+PROMPT_GASTO = """Eres un asistente que extrae datos de gastos personales en Perú.
 Responde SOLO con JSON válido, sin texto extra, sin backticks, sin comentarios.
 
-Hoy es {hoy.strftime("%d/%m/%Y")} ({dia_semana}).
-
 Estructura exacta:
-{{
-  "descripcion": "texto corto del gasto o destino del pasaje",
+{
+  "descripcion": "texto corto del gasto",
   "cantidad": 50.00,
-  "categoria": "Alimentación",
-  "subcategoria": "No aplica",
-  "metodo": "Efectivo",
-  "fecha": "DD/MM/YYYY"
-}}
-
-Reglas de Fecha (¡MUY IMPORTANTE!):
-- Calcula la fecha exacta basada en el mensaje del usuario.
-- Si el usuario dice "ayer", pon la fecha de ayer.
-- Si dice "hace 2 días", resta 2 días a la fecha de hoy.
-- Si dice "el lunes", calcula la fecha de ese día.
-- Si NO menciona ninguna fecha temporal, usa la fecha de hoy por defecto: {hoy.strftime("%d/%m/%Y")}.
-
-[... AQUÍ PEGA EL RESTO DE TUS REGLAS DE CATEGORÍAS, MÉTODOS Y PASAJES QUE YA TENÍAS ...]
+  "tipo_gasto_2": "Alimentación",
+  "metodo": "Efectivo"
+}
 
 Valores válidos para metodo (elige el más apropiado):
 Efectivo, Bcp / Yape, BBVA / Plin, Tarjeta de Regalo,
@@ -96,7 +78,6 @@ Interbank / Plin, Tarjeta de crédito, Ahorros, Tarjeta de metro
 
 Categorías y su significado exacto (elige la más apropiada):
 - Alimentación: comidas personales del día a día — desayuno, almuerzo, cena, jugos, etc.
-- Pasajes: gastos de transporte. 
 - Amigos: gastos que hago EN un amigo — regalos, detalles, pagar algo por un amigo.
 - Caridad: ayuda económica a personas en situación de calle u ONGs, no relacionado a la iglesia.
 - Dios: ofrendas, diezmos, aportes a la iglesia o actividades religiosas.
@@ -110,37 +91,53 @@ Categorías y su significado exacto (elige la más apropiada):
 - Salidas: gastos al salir — restaurantes, cines, paseos, viajes, entretenimiento fuera de casa, salidas con amigos o pareja.
 - Suscripciones: pagos recurrentes de apps y plataformas digitales — Netflix, HBO Max, Spotify, Duolingo, Google One, ChatGPT, Claude, etc.
 
-Reglas IMPORTANTES para Pasajes:
-- Si el gasto es transporte, "categoria" es SIEMPRE "Pasajes".
-- Si "categoria" es "Pasajes", en "subcategoria" debes poner: Moto, Taxi, Micro o Metro.
-- Si menciona "metro", "categoria" es Pasajes, "subcategoria" es Metro y "metodo" es Tarjeta de metro.
-- Para CUALQUIER OTRA categoría que no sea Pasajes, "subcategoria" SIEMPRE es "No aplica".
-
-Otras reglas:
-- Si menciona "yape" o "bcp" → metodo: Bcp / Yape
+Reglas importantes:
 - Si el gasto es para una mascota → siempre Perrihijos
+- Si es una comida personal → siempre Alimentación
 - Si es un servicio digital recurrente → siempre Suscripciones
 - Si hay duda entre Gustos e Innecesario → usa Gustos por defecto
 - Si hay duda entre Familia y Salidas → si salieron juntos usa Salidas, si compró algo para un familiar usa Familia
-- Si es una comida personal → siempre Alimentación
+
+Si es imagen de boleta, extrae el total y el tipo de negocio."""
+
+PROMPT_PASAJE = """Eres un asistente que extrae datos de pasajes/transporte en Perú.
+Responde SOLO con JSON válido, sin texto extra, sin backticks, sin comentarios.
+
+Estructura exacta:
+{
+  "cantidad": 3.00,
+  "metodo": "Efectivo",
+  "tipo": "Moto",
+  "nota": "texto breve de una línea sobre el pasaje"
+}
+
+Valores válidos para tipo: Moto, Taxi, Micro, Metro
+
+Valores válidos para metodo (elige EXACTAMENTE uno):
+Efectivo, Bcp / Yape, BBVA / Plin, Tarjeta de Regalo,
+Interbank / Plin, Tarjeta de crédito, Ahorros, Tarjeta de metro
+
+Reglas:
+- Si menciona "yape" o "bcp" → metodo: Bcp / Yape
 - Si menciona "plin" o "bbva" → metodo: BBVA / Plin
-- Si es imagen de boleta, extrae el total y el tipo de negocio. """
+- Si menciona "metro" → tipo: Metro, metodo: Tarjeta de metro
+- Si no se menciona método → metodo: Efectivo
+- El campo metodo NUNCA puede ser null ni None"""
 
-
-PROMPT_CORRECCION = """El usuario quiere corregir datos de un egreso.
+PROMPT_CORRECCION = """El usuario quiere corregir datos de un gasto/pasaje.
 Tienes los datos actuales y el mensaje del usuario indicando qué cambiar.
 Responde SOLO con el JSON corregido completo, sin texto extra, sin backticks."""
 
 PROMPT_CHAT = """Eres un asistente financiero personal amigable llamado FinBot.
-Ayudas a registrar egresos y consultar saldos por WhatsApp.
+Ayudas a registrar gastos y consultar saldos por WhatsApp.
 El usuario te está enviando un mensaje casual o de cortesía.
 Responde de forma corta, amigable y natural. No uses más de 2 líneas.
 No inventes información financiera.
 Si pregunta qué puedes hacer, explica brevemente:
-- Registrar egresos
+- Registrar gastos y pasajes
 - Consultar saldo y dinero disponible
-- Ver egresos de hoy, ayer, esta semana o por fecha
-- Consultar egresos por categoría"""
+- Ver gastos de hoy, ayer, esta semana o por fecha
+- Consultar gastos por categoría"""
 
 def get_prompt_intencion():
     hoy = datetime.now()
@@ -149,31 +146,32 @@ def get_prompt_intencion():
     return f"""Eres un clasificador de intenciones para un bot financiero personal.
 Analiza el mensaje del usuario y responde SOLO con un JSON así:
 {{
-  "intencion": "REGISTRAR_EGRESO",
+  "intencion": "REGISTRAR_GASTO",
   "categoria": null,
   "fecha": null
 }}
 
 Intenciones posibles:
-- REGISTRAR_EGRESO: quiere registrar un egreso (gasto, pasaje u otro gasto general)
+- REGISTRAR_GASTO: quiere registrar un gasto o compra
+- REGISTRAR_PASAJE: quiere registrar un pasaje o transporte
 - CONSULTAR_SALDO: quiere saber cuánto dinero tiene disponible
 - CONSULTAR_AHORROS: quiere saber cuánto tiene en ahorros
 - CONSULTAR_PRESTAMO: quiere saber cuánto le deben o sus préstamos
-- CONSULTAR_EGRESO_MES: quiere saber cuánto ha gastado en total este mes
-- CONSULTAR_EGRESO_HOY: quiere saber cuánto ha gastado hoy
-- CONSULTAR_EGRESO_AYER: quiere saber cuánto gastó ayer
-- CONSULTAR_EGRESO_SEMANA: quiere saber cuánto gastó esta semana
-- CONSULTAR_EGRESO_FECHA: quiere saber cuánto gastó en una fecha específica
-- CONSULTAR_EGRESO_MAYOR: quiere saber cuál fue su egreso más grande
-- CONSULTAR_EGRESO_CATEGORIA: quiere saber cuánto gastó en una categoría específica (por ejemplo si en el mensaje menciona "cuánto gasté en alimentación", la categoría sería "Alimentación")
+- CONSULTAR_GASTO_MES: quiere saber cuánto ha gastado en total este mes
+- CONSULTAR_GASTO_HOY: quiere saber cuánto ha gastado hoy
+- CONSULTAR_GASTO_AYER: quiere saber cuánto gastó ayer
+- CONSULTAR_GASTO_SEMANA: quiere saber cuánto gastó esta semana
+- CONSULTAR_GASTO_FECHA: quiere saber cuánto gastó en una fecha específica
+- CONSULTAR_GASTO_MAYOR: quiere saber cuál fue su gasto más grande
+- CONSULTAR_GASTO_CATEGORIA: quiere saber cuánto gastó en una categoría específica
 - CHAT_CASUAL: saludo, agradecimiento, confirmación, conversación general
 
-Para CONSULTAR_EGRESO_CATEGORIA: en "categoria" pon el nombre exacto de la categoría.
-Para CONSULTAR_EGRESO_FECHA: en "fecha" pon la fecha en formato DD/MM/YYYY.
+Para CONSULTAR_GASTO_CATEGORIA: en "categoria" pon el nombre exacto de la categoría.
+Para CONSULTAR_GASTO_FECHA: en "fecha" pon la fecha en formato DD/MM/YYYY.
 Hoy es {hoy.strftime("%d/%m/%Y")} ({dia_semana}). Si el usuario dice "el lunes", "el martes", etc., calcula la fecha exacta de ese día en la semana actual o la anterior.
 En otros casos pon null en "fecha" y "categoria".
 
-Categorías válidas: Alimentación, Amigos, Caridad, Dios, Familia, Gastos hormiga, Gastos innecesario, Gustos, Inversión en mí, Pago servicio, Pasajes, Perrihijos, Salidas, Suscripciones"""
+Categorías válidas: Alimentación, Amigos, Caridad, Dios, Familia, Gastos hormiga, Gastos innecesario, Gustos, Inversión en mí, Pago servicio, Perrihijos, Salidas, Suscripciones"""
 
 # -------------------------------------------------------
 # LLAMADA A IA
@@ -231,11 +229,11 @@ def llamar_ia(prompt, texto, media_url=None, media_type=None):
 # -------------------------------------------------------
 
 def normalizar_datos(datos):
-    if "categoria" in datos:
-        valor = datos["categoria"].strip().lower()
+    if "tipo_gasto_2" in datos:
+        valor = datos["tipo_gasto_2"].strip().lower()
         for cat in CATEGORIAS_VALIDAS:
             if cat.lower() == valor:
-                datos["categoria"] = cat
+                datos["tipo_gasto_2"] = cat
                 break
     if "metodo" in datos:
         valor = datos["metodo"].strip().lower()
@@ -249,8 +247,8 @@ def normalizar_datos(datos):
 # GUARDAR EN SHEETS
 # -------------------------------------------------------
 
-def guardar_egreso(datos):
-    ws = get_sheet("Egresos")
+def guardar_gasto(datos):
+    ws = get_sheet("Gastos")
     col_b = ws.col_values(2)
     ultima_fila_con_dato = 1
     for i, valor in enumerate(col_b):
@@ -258,23 +256,32 @@ def guardar_egreso(datos):
             ultima_fila_con_dato = i + 1
     nueva_fila = ultima_fila_con_dato + 1
     fecha_hoy = datetime.now().strftime("%d/%m/%Y")
-    fecha_gasto = datos.get("fecha", fecha_hoy)
-    
-    
-    
-    # Escribe Descripción(B), Monto(C), Fecha(D)
     ws.update([[
         datos.get("descripcion", ""),
         datos['cantidad'],
-        fecha_gasto,
-    ]], f"B{nueva_fila}:D{nueva_fila}", value_input_option="USER_ENTERED")
-    
-    # Escribe Categoría Nivel 2(G), Sub-categoría(H), Método(I)
+        fecha_hoy,
+    ]], f"B{nueva_fila}:D{nueva_fila}")
     ws.update([[
-        datos.get("categoria", "Otros"),
-        datos.get("subcategoria", "No aplica"),
+        datos.get("tipo_gasto_2", "Otros"),
         datos.get("metodo", "Efectivo"),
-    ]], f"G{nueva_fila}:I{nueva_fila}", value_input_option="USER_ENTERED")
+    ]], f"F{nueva_fila}:G{nueva_fila}")
+
+def guardar_pasaje(datos):
+    ws = get_sheet("Pasajes")
+    col_b = ws.col_values(2)
+    ultima_fila_con_dato = 1
+    for i, valor in enumerate(col_b):
+        if valor.strip():
+            ultima_fila_con_dato = i + 1
+    nueva_fila = ultima_fila_con_dato + 1
+    fecha_hoy = datetime.now().strftime("%d/%m/%Y")
+    ws.update([[
+        datos['cantidad'],
+        fecha_hoy,
+        datos.get("metodo", "Efectivo"),
+        datos.get("tipo", "Moto"),
+        datos.get("nota", ""),
+    ]], f"B{nueva_fila}:F{nueva_fila}")
 
 # -------------------------------------------------------
 # CONSULTA DE SALDO
@@ -283,16 +290,16 @@ def guardar_egreso(datos):
 def obtener_saldos():
     ws = get_sheet("Resumen")
     return {
-        "efectivo":    ws.acell("C4").value,
-        "bcp_yape":    ws.acell("D4").value,
-        "bbva_plin":   ws.acell("C6").value,
-        "metro":       ws.acell("D6").value,
-        "interbank":   ws.acell("D8").value,
-        "ahorros":     ws.acell("C12").value,
-        "prestamos":   ws.acell("D10").value,
-        "tarjeta":     ws.acell("C14").value,
-        "total_pagos": ws.acell("D18").value,
-        "gasto_mes":   ws.acell("A6").value,
+        "efectivo":    ws.acell("E6").value,
+        "bcp_yape":    ws.acell("F6").value,
+        "bbva_plin":   ws.acell("E8").value,
+        "metro":       ws.acell("F8").value,
+        "interbank":   ws.acell("F10").value,
+        "ahorros":     ws.acell("E14").value,
+        "prestamos":   ws.acell("F12").value,
+        "tarjeta":     ws.acell("E16").value,
+        "total_pagos": ws.acell("F20").value,
+        "gasto_mes":   ws.acell("C8").value,
     }
 
 def respuesta_desglose(s):
@@ -312,18 +319,17 @@ def respuesta_desglose(s):
 # CONSULTAS DEL HISTORIAL
 # -------------------------------------------------------
 
-def obtener_filas_egresos():
-    ws = get_sheet("Egresos")
+def obtener_filas_gastos():
+    ws = get_sheet("Gastos")
     todos = ws.get_all_values()
     filas = []
     for fila in todos[1:]:
-        if len(fila) < 7: # Asegura que la fila tenga al menos hasta la col G
+        if len(fila) < 7:
             continue
-        descripcion = fila[1].strip() # Columna B
-        cantidad    = fila[2].strip() # Columna C
-        fecha       = fila[3].strip() # Columna D
-        categoria   = fila[6].strip() # Columna G (Categoría Nivel 2)
-        
+        descripcion = fila[1].strip()
+        cantidad    = fila[2].strip()
+        fecha       = fila[3].strip()
+        categoria   = fila[5].strip()
         if not cantidad or not fecha or not descripcion:
             continue
         try:
@@ -338,7 +344,6 @@ def obtener_filas_egresos():
             "fecha_dt": fecha_dt,
             "categoria": categoria
         })
-
     return filas
 
 def formatear_gastos(gastos, titulo):
@@ -357,7 +362,7 @@ def formatear_gastos(gastos, titulo):
 
 def consulta_gasto_hoy():
     hoy = datetime.now()
-    filas = obtener_filas_egresos()
+    filas = obtener_filas_gastos()
     gastos = [g for g in filas
               if g["fecha_dt"].day == hoy.day
               and g["fecha_dt"].month == hoy.month
@@ -366,7 +371,7 @@ def consulta_gasto_hoy():
 
 def consulta_gasto_ayer():
     ayer = datetime.now() - timedelta(days=1)
-    filas = obtener_filas_egresos()
+    filas = obtener_filas_gastos()
     gastos = [g for g in filas
               if g["fecha_dt"].day == ayer.day
               and g["fecha_dt"].month == ayer.month
@@ -377,7 +382,7 @@ def consulta_gasto_semana():
     hoy = datetime.now()
     inicio_semana = hoy - timedelta(days=hoy.weekday())
     inicio_semana = inicio_semana.replace(hour=0, minute=0, second=0, microsecond=0)
-    filas = obtener_filas_egresos()
+    filas = obtener_filas_gastos()
     gastos = [g for g in filas if inicio_semana <= g["fecha_dt"] <= hoy]
     return formatear_gastos(gastos, "esta semana")
 
@@ -386,7 +391,7 @@ def consulta_gasto_fecha(fecha_str):
         fecha_dt = datetime.strptime(fecha_str, "%d/%m/%Y")
     except:
         return "No pude entender la fecha. Intenta con formato DD/MM/YYYY."
-    filas = obtener_filas_egresos()
+    filas = obtener_filas_gastos()
     gastos = [g for g in filas
               if g["fecha_dt"].day == fecha_dt.day
               and g["fecha_dt"].month == fecha_dt.month
@@ -395,7 +400,7 @@ def consulta_gasto_fecha(fecha_str):
 
 def consulta_gasto_mes():
     hoy = datetime.now()
-    filas = obtener_filas_egresos()
+    filas = obtener_filas_gastos()
     gastos = [g for g in filas
               if g["fecha_dt"].month == hoy.month
               and g["fecha_dt"].year == hoy.year]
@@ -403,7 +408,7 @@ def consulta_gasto_mes():
 
 def consulta_gasto_por_categoria(categoria_buscada):
     hoy = datetime.now()
-    filas = obtener_filas_egresos()
+    filas = obtener_filas_gastos()
     gastos = [g for g in filas
               if categoria_buscada.lower() in g["categoria"].lower()
               and g["fecha_dt"].month == hoy.month
@@ -419,7 +424,7 @@ def consulta_gasto_por_categoria(categoria_buscada):
 
 def consulta_gasto_mayor():
     hoy = datetime.now()
-    filas = obtener_filas_egresos()
+    filas = obtener_filas_gastos()
     gastos = [g for g in filas
               if g["fecha_dt"].month == hoy.month
               and g["fecha_dt"].year == hoy.year]
@@ -438,15 +443,23 @@ def consulta_gasto_mayor():
 # RESUMEN PARA CONFIRMACIÓN
 # -------------------------------------------------------
 
-def resumen_egresos(datos):
+def resumen_gasto(datos):
     return (
-        f"📋 *Confirma el egreso:*\n"
-        f"📅 Fecha: {datos.get('fecha')}\n"  
+        f"📋 *Confirma el gasto:*\n"
         f"📝 Descripción: {datos.get('descripcion')}\n"
         f"💰 Cantidad: S/.{datos['cantidad']:.2f}\n"
-        f"📂 Categoría: {datos.get('categoria')}\n"
-        f"📂 Subcategoría: {datos.get('subcategoria')}\n"
+        f"📂 Categoría: {datos.get('tipo_gasto_2')}\n"
         f"💳 Método: {datos.get('metodo')}\n\n"
+        f"Responde:\n✅ *sí* para registrar\n✏️ O dime qué corregir\n❌ *cancelar* para descartar"
+    )
+
+def resumen_pasaje(datos):
+    return (
+        f"📋 *Confirma el pasaje:*\n"
+        f"🚗 Tipo: {datos.get('tipo')}\n"
+        f"💰 Cantidad: S/.{datos['cantidad']:.2f}\n"
+        f"💳 Método: {datos.get('metodo')}\n"
+        f"📝 Nota: {datos.get('nota')}\n\n"
         f"Responde:\n✅ *sí* para registrar\n✏️ O dime qué corregir\n❌ *cancelar* para descartar"
     )
 
@@ -477,6 +490,7 @@ def enviar_whatsapp(remitente, mensaje, tiempo_inicio=None):
 def procesar_mensaje(texto, media_url, media_type, remitente):
     texto_lower  = texto.lower().strip()
     tiempo_inicio = datetime.now()
+
     try:
         # ── Usuario con estado pendiente ──
         if remitente in estados:
@@ -528,38 +542,54 @@ def procesar_mensaje(texto, media_url, media_type, remitente):
             datos = estado["datos"]
 
             if texto_lower in ["sí", "si", "s", "yes", "✅", "ok", "dale", "confirmar"]:
-                guardar_egreso(datos)
-                enviar_whatsapp(remitente,
-                    f"✅ *Egreso registrado*\n"
-                    f"📝 {datos.get('descripcion')}\n"
-                    f"💰 S/.{datos['cantidad']:.2f}\n"
-                    f"📂 {datos.get('categoria')} ({datos.get('subcategoria')})\n"
-                    f"💳 {datos.get('metodo')}",
-                    tiempo_inicio
+                if tipo == "gasto":
+                    guardar_gasto(datos)
+                    enviar_whatsapp(remitente,
+                        f"✅ *Gasto registrado*\n"
+                        f"📝 {datos.get('descripcion')}\n"
+                        f"💰 S/.{datos['cantidad']:.2f}\n"
+                        f"📂 {datos.get('tipo_gasto_2')}\n"
+                        f"💳 {datos.get('metodo')}",
+                        tiempo_inicio
+                    )
+                else:
+                    guardar_pasaje(datos)
+                    enviar_whatsapp(remitente,
+                        f"🚌 *Pasaje registrado*\n"
+                        f"🚗 {datos.get('tipo')}\n"
+                        f"💰 S/.{datos['cantidad']:.2f}\n"
+                        f"💳 {datos.get('metodo')}\n"
+                        f"📝 {datos.get('nota')}",
+                        tiempo_inicio
                     )
                 del estados[remitente]
+
             elif texto_lower in ["cancelar", "no", "cancel"]:
                 del estados[remitente]
                 enviar_whatsapp(remitente, "❌ Registro cancelado.", tiempo_inicio)
+
             else:
                 prompt_correccion = f"{PROMPT_CORRECCION}\n\nDatos actuales:\n{json.dumps(datos, ensure_ascii=False)}"
                 datos_corregidos = llamar_ia(prompt_correccion, texto)
                 datos_corregidos = normalizar_datos(datos_corregidos)
                 estados[remitente]["datos"] = datos_corregidos
-                enviar_whatsapp(remitente, resumen_egresos(datos_corregidos), tiempo_inicio)
+                if tipo == "gasto":
+                    enviar_whatsapp(remitente, resumen_gasto(datos_corregidos), tiempo_inicio)
+                else:
+                    enviar_whatsapp(remitente, resumen_pasaje(datos_corregidos), tiempo_inicio)
 
         # ── Nuevo mensaje — detectar intención con IA ──
         else:
             print(">>> Detectando intención...")
             try:
                 intencion_raw = llamar_ia(get_prompt_intencion(), texto)
-                intencion = intencion_raw.get("intencion", "REGISTRAR_EGRESO")
+                intencion = intencion_raw.get("intencion", "REGISTRAR_GASTO")
                 categoria = intencion_raw.get("categoria")
                 fecha     = intencion_raw.get("fecha")
                 print(f">>> Intención: {intencion} | Categoría: {categoria} | Fecha: {fecha}")
             except Exception as e:
-                print(f">>> Error detectando intención: {e} — asumiendo REGISTRAR_EGRESO")
-                intencion = "REGISTRAR_EGRESO"
+                print(f">>> Error detectando intención: {e} — asumiendo REGISTRAR_GASTO")
+                intencion = "REGISTRAR_GASTO"
                 categoria = None
                 fecha     = None
 
@@ -571,7 +601,7 @@ def procesar_mensaje(texto, media_url, media_type, remitente):
                 s = obtener_saldos()
                 enviar_whatsapp(remitente, f"💸 *Préstamos / lo que te deben:* {s['prestamos']}", tiempo_inicio)
 
-            elif intencion == "CONSULTAR_EGRESO_MES":
+            elif intencion == "CONSULTAR_GASTO_MES":
                 s = obtener_saldos()
                 enviar_whatsapp(remitente, f"📊 *Tu gasto total este mes:* {s['gasto_mes']}", tiempo_inicio)
 
@@ -586,16 +616,16 @@ def procesar_mensaje(texto, media_url, media_type, remitente):
                     tiempo_inicio
                 )
 
-            elif intencion == "CONSULTAR_EGRESO_HOY":
+            elif intencion == "CONSULTAR_GASTO_HOY":
                 enviar_whatsapp(remitente, consulta_gasto_hoy(), tiempo_inicio)
 
-            elif intencion == "CONSULTAR_EGRESO_AYER":
+            elif intencion == "CONSULTAR_GASTO_AYER":
                 enviar_whatsapp(remitente, consulta_gasto_ayer(), tiempo_inicio)
 
-            elif intencion == "CONSULTAR_EGRESO_SEMANA":
+            elif intencion == "CONSULTAR_GASTO_SEMANA":
                 enviar_whatsapp(remitente, consulta_gasto_semana(), tiempo_inicio)
 
-            elif intencion == "CONSULTAR_EGRESO_FECHA":
+            elif intencion == "CONSULTAR_GASTO_FECHA":
                 if fecha:
                     enviar_whatsapp(remitente, consulta_gasto_fecha(fecha), tiempo_inicio)
                 else:
@@ -606,10 +636,10 @@ def procesar_mensaje(texto, media_url, media_type, remitente):
                         tiempo_inicio
                     )
 
-            elif intencion == "CONSULTAR_EGRESO_MAYOR":
+            elif intencion == "CONSULTAR_GASTO_MAYOR":
                 enviar_whatsapp(remitente, consulta_gasto_mayor(), tiempo_inicio)
 
-            elif intencion == "CONSULTAR_EGRESO_CATEGORIA":
+            elif intencion == "CONSULTAR_GASTO_CATEGORIA":
                 if categoria:
                     enviar_whatsapp(remitente, consulta_gasto_por_categoria(categoria), tiempo_inicio)
                 else:
@@ -628,12 +658,19 @@ def procesar_mensaje(texto, media_url, media_type, remitente):
                     respuesta = "¡Hola! ¿En qué puedo ayudarte?"
                 enviar_whatsapp(remitente, respuesta, tiempo_inicio)
 
-            else:
-                print(">>> Llamando a IA (egreso)...")
-                datos = llamar_ia(get_prompt_egreso(), texto, media_url, media_type)
+            elif intencion == "REGISTRAR_PASAJE":
+                print(">>> Llamando a IA (pasaje)...")
+                datos = llamar_ia(PROMPT_PASAJE, texto, media_url, media_type)
                 datos = normalizar_datos(datos)
-                estados[remitente] = {"datos": datos, "tipo": "egreso"}
-                enviar_whatsapp(remitente, resumen_egresos(datos), tiempo_inicio)
+                estados[remitente] = {"datos": datos, "tipo": "pasaje"}
+                enviar_whatsapp(remitente, resumen_pasaje(datos), tiempo_inicio)
+
+            else:
+                print(">>> Llamando a IA (gasto)...")
+                datos = llamar_ia(PROMPT_GASTO, texto, media_url, media_type)
+                datos = normalizar_datos(datos)
+                estados[remitente] = {"datos": datos, "tipo": "gasto"}
+                enviar_whatsapp(remitente, resumen_gasto(datos), tiempo_inicio)
 
     except Exception as e:
         import traceback
