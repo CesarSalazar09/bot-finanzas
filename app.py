@@ -29,7 +29,7 @@ client = OpenAI(
 )
 
 # Modelo principal para texto e intenciones (Llama 3 de 8 billones de parámetros, ultra rápido)
-MODEL_TEXTO = "llama3-8b-8192"
+MODEL_TEXTO = "llama-3.1-8b-instant"
 
 # Modelo para leer fotos de recibos/boletas (Llama 3.2 Vision de 90 billones de parámetros)
 MODELOS_VISION = ["llama-3.2-90b-vision-preview"]
