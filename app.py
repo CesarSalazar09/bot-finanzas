@@ -12,6 +12,7 @@ load_dotenv()
 app = Flask(__name__)
 
 # --- OpenRouter ---
+'''
 client = OpenAI(
     api_key=os.getenv("OPENROUTER_API_KEY"),
     base_url="https://openrouter.ai/api/v1"
@@ -21,6 +22,20 @@ MODELOS_VISION = [
     "nvidia/nemotron-nano-12b-v2-vl:free",
     "mistralai/mistral-small-3.1-24b-instruct:free",
 ]
+'''
+client = OpenAI(
+    api_key=os.getenv("GROQ_API_KEY"),
+    base_url="https://api.groq.com/openai/v1"
+)
+
+# Modelo principal para texto e intenciones (Llama 3 de 8 billones de parámetros, ultra rápido)
+MODEL_TEXTO = "llama3-8b-8192"
+
+# Modelo para leer fotos de recibos/boletas (Llama 3.2 Vision de 90 billones de parámetros)
+MODELOS_VISION = ["llama-3.2-90b-vision-preview"]
+
+
+
 
 # --- Estado temporal por usuario ---
 estados = {}
