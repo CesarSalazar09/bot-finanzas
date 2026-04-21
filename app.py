@@ -32,7 +32,7 @@ client = OpenAI(
 MODEL_TEXTO = "llama-3.1-8b-instant"
 
 # Modelo para leer fotos de recibos/boletas (Llama 3.2 Vision de 90 billones de parámetros)
-MODELOS_VISION = ["llama-3.2-90b-vision-preview"]
+MODELOS_VISION = ["llama-3.2-11b-vision-preview"]
 
 
 
