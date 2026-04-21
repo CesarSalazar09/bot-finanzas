@@ -274,9 +274,7 @@ def guardar_egreso(datos):
     nueva_fila = ultima_fila_con_dato + 1
     fecha_hoy = datetime.now().strftime("%d/%m/%Y")
     fecha_gasto = datos.get("fecha", fecha_hoy)
-    
-    
-    
+
     # Escribe Descripción(B), Monto(C), Fecha(D)
     ws.update([[
         datos.get("descripcion", ""),
@@ -290,6 +288,8 @@ def guardar_egreso(datos):
         datos.get("subcategoria", "No aplica"),
         datos.get("metodo", "Efectivo"),
     ]], f"G{nueva_fila}:I{nueva_fila}", value_input_option="USER_ENTERED")
+    
+    print(f">>> Registro guardado exitosamente en la fila {nueva_fila}")
 
 # -------------------------------------------------------
 # CONSULTA DE SALDO
