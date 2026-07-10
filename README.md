@@ -35,5 +35,13 @@ Para ejecutar este proyecto, necesitas configurar los siguientes archivos:
 2. **`credentials_user.json`**: Archivo obtenido desde Google Cloud Console (OAuth2 App de escritorio).
 3. **`token.json`**: Se genera automáticamente al iniciar sesión por primera vez mediante el navegador.
 
+## 🧪 Pruebas Locales (tester.py)
+Para facilitar el desarrollo y evitar costos innecesarios en la API de Twilio, el proyecto incluye un script de prueba local (`tester.py`). 
+* **¿Qué hace?**: Simula las peticiones `POST` que Twilio enviaría a tu servidor.
+* **Beneficio**: Permite probar toda la lógica de la IA, el procesamiento de mensajes y la integración con Google Sheets sin necesidad de usar un dispositivo móvil ni enviar mensajes reales.
+* **Cómo usarlo**: 
+    1. Ejecuta tu bot: `python app.py`.
+    2. En otra terminal, ejecuta el simulador: `python tester.py`.
+
 ## 🤝 Contribuciones
 Este proyecto está diseñado para uso personal. Si deseas adaptarlo, asegúrate de configurar tu propio entorno de Google Cloud y tus llaves de API.
