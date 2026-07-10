@@ -1,0 +1,21 @@
+{
+  "categorias": [
+    "Comida", "Transporte", "Servicios", "Ocio", "Mascotas"
+  ],
+  "metodos": [
+    "Efectivo", "Tarjeta de Débito", "Tarjeta de Crédito"
+  ],
+  "reglas_categorias": "- Comida: supermercado y restaurantes.\n- Transporte: gasolina, bus, taxis.\n- Servicios: luz, agua, internet.\n- Ocio: salidas, cine, suscripciones.\n- Mascotas: veterinario, comida para mascotas.",
+  "celdas_saldo": {
+    "efectivo": "B2",
+    "bcp_yape": "B3",
+    "bbva_plin": "B4",
+    "metro": "B5",
+    "interbank": "B6",
+    "ahorros": "B7",
+    "prestamos": "B8",
+    "tarjeta": "B9",
+    "total_pagos": "B10",
+    "gasto_mes": "C10"
+  }
+}

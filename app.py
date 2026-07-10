@@ -6,54 +6,47 @@ from google.oauth2.service_account import Credentials
 import httpx, json, os, base64, threading
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from google.auth.transport.requests import Request
+import os.path
+
 
 load_dotenv()
 
 app = Flask(__name__)
 
-# --- OpenRouter ---
-'''
-client = OpenAI(
-    api_key=os.getenv("OPENROUTER_API_KEY"),
-    base_url="https://openrouter.ai/api/v1"
-)
-MODEL_TEXTO    = "openrouter/free"
-MODELOS_VISION = [
-    "nvidia/nemotron-nano-12b-v2-vl:free",
-    "mistralai/mistral-small-3.1-24b-instruct:free",
-]
-'''
+# -------------------------------------------------------
+# CARGAR CONFIGURACIÓN EXTERNA (Privada)
+# -------------------------------------------------------
+try:
+    with open('config.json', 'r', encoding='utf-8') as f:
+        config_data = json.load(f)
+except FileNotFoundError:
+    print("ADVERTENCIA: No se encontró config.json. El bot usará configuraciones por defecto vacías.")
+    config_data = {"categorias": [], "metodos": [], "reglas_categorias": "", "celdas_saldo": {}}
+
+CATEGORIAS_VALIDAS = config_data.get("categorias", [])
+METODOS_VALIDOS = config_data.get("metodos", [])
+REGLAS_CATEGORIAS = config_data.get("reglas_categorias", "")
+CELDAS_SALDO = config_data.get("celdas_saldo", {})
+
+# -------------------------------------------------------
+# CONFIGURACIÓN DE IA
+# -------------------------------------------------------
 client = OpenAI(
     api_key=os.getenv("GROQ_API_KEY"),
     base_url="https://api.groq.com/openai/v1"
 )
 
-# Modelo principal para texto e intenciones (Llama 3 de 8 billones de parámetros, ultra rápido)
+# Modelo principal para texto e intenciones
 MODEL_TEXTO = "llama-3.1-8b-instant"
 
-# Modelo para leer fotos de recibos/boletas (Llama 3.2 Vision de 90 billones de parámetros)
+# Modelo para leer fotos de recibos/boletas
 MODELOS_VISION = ["llama-3.2-11b-vision-preview"]
-
-
-
 
 # --- Estado temporal por usuario ---
 estados = {}
-
-# -------------------------------------------------------
-# CATEGORÍAS Y MÉTODOS VÁLIDOS
-# -------------------------------------------------------
-
-CATEGORIAS_VALIDAS = [
-    "Alimentación", "Amigos", "Caridad", "Dios", "Familia",
-    "Gastos hormiga", "Gastos innecesario", "Gustos", "Inversión en mí",
-    "Pago servicio", "Pasajes", "Perrihijos", "Salidas", "Suscripciones"
-]
-
-METODOS_VALIDOS = [
-    "Efectivo", "Bcp / Yape", "BBVA / Plin", "Tarjeta de Regalo",
-    "Interbank / Plin", "Tarjeta de crédito", "Ahorros", "Tarjeta de metro"
-]
 
 # -------------------------------------------------------
 # GOOGLE SHEETS
@@ -61,14 +54,30 @@ METODOS_VALIDOS = [
 
 def get_creds():
     scopes = ["https://www.googleapis.com/auth/spreadsheets"]
-    creds_json = os.getenv("GOOGLE_CREDENTIALS")
-    if creds_json:
-        creds_info = json.loads(creds_json)
-        return Credentials.from_service_account_info(creds_info, scopes=scopes)
-    return Credentials.from_service_account_file("credentials.json", scopes=scopes)
+    creds = None
+    
+    # Busca si ya tienes un token guardado de una sesión anterior
+    if os.path.exists('token.json'):
+        creds = Credentials.from_authorized_user_file('token.json', scopes)
+    
+    # Si no hay credenciales válidas, inicia el flujo de inicio de sesión
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            # Aquí es donde se abrirá tu navegador para loguearte
+            flow = InstalledAppFlow.from_client_secrets_file('credentials.json', scopes)
+            creds = flow.run_local_server(port=0)
+        
+        # Guardamos el token para no tener que loguearnos cada vez
+        with open('token.json', 'w') as token:
+            token.write(creds.to_json())
+            
+    return creds
 
 def get_sheet(nombre_hoja):
-    gc = gspread.authorize(get_creds())
+    creds = get_creds()
+    gc = gspread.authorize(creds)
     sh = gc.open_by_key(os.getenv("SPREADSHEET_ID"))
     return sh.worksheet(nombre_hoja)
 
@@ -81,18 +90,18 @@ def get_prompt_egreso():
     dias_es = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
     dia_semana = dias_es[hoy.weekday()]
     
-    return f"""Eres un asistente que extrae datos de egresos (gastos y pasajes) personales en Perú.
+    return f"""Eres un asistente que extrae datos de egresos personales.
 Responde SOLO con JSON válido, sin texto extra, sin backticks, sin comentarios.
 
 Hoy es {hoy.strftime("%d/%m/%Y")} ({dia_semana}).
 
 Estructura exacta:
 {{
-  "descripcion": "texto corto del gasto o destino del pasaje",
+  "descripcion": "texto corto del gasto",
   "cantidad": 50.00,
-  "categoria": "Alimentación",
+  "categoria": "Categoría Ejemplo",
   "subcategoria": "No aplica",
-  "metodo": "Efectivo",
+  "metodo": "Metodo Ejemplo",
   "fecha": "DD/MM/YYYY"
 }}
 
@@ -103,59 +112,32 @@ Reglas de Fecha (¡MUY IMPORTANTE!):
 - Si dice "el lunes", calcula la fecha de ese día.
 - Si NO menciona ninguna fecha temporal, usa la fecha de hoy por defecto: {hoy.strftime("%d/%m/%Y")}.
 
-[... AQUÍ PEGA EL RESTO DE TUS REGLAS DE CATEGORÍAS, MÉTODOS Y PASAJES QUE YA TENÍAS ...]
-
 Valores válidos para metodo (elige el más apropiado):
-Efectivo, Bcp / Yape, BBVA / Plin, Tarjeta de Regalo,
-Interbank / Plin, Tarjeta de crédito, Ahorros, Tarjeta de metro
+{', '.join(METODOS_VALIDOS)}
 
 Categorías y su significado exacto (elige la más apropiada):
-- Alimentación: comidas personales del día a día — desayuno, almuerzo, cena, jugos, etc.
-- Pasajes: gastos de transporte. 
-- Amigos: gastos que hago EN un amigo — regalos, detalles, pagar algo por un amigo.
-- Caridad: ayuda económica a personas en situación de calle u ONGs, no relacionado a la iglesia.
-- Dios: ofrendas, diezmos, aportes a la iglesia o actividades religiosas.
-- Familia: gastos que hago en mi familia — compras para la casa, regalos a familiares, compartir algo en casa. NO incluye salidas grupales con familia (eso es Salidas).
-- Gastos hormiga: gastos pequeños del día a día que parecen insignificantes — café, golosinas, snacks, chucherías.
-- Gastos innecesario: cosas que compré pero no debí gastar, compras impulsivas de las que me arrepiento.
-- Gustos: algo que me compré porque se me antojó y lo disfruto, sin arrepentimiento — caprichos personales.
-- Inversión en mí: gastos en mi bienestar, desarrollo personal, profesional o salud — cursos, libros, gimnasio, médico, psicólogo, educación, cuidado personal.
-- Pago servicio: pagos de servicios básicos y del hogar — luz, agua, internet, celular, teléfono.
-- Perrihijos: cualquier gasto relacionado a mis mascotas — comida, veterinario, medicamentos, accesorios, análisis.
-- Salidas: gastos al salir — restaurantes, cines, paseos, viajes, entretenimiento fuera de casa, salidas con amigos o pareja.
-- Suscripciones: pagos recurrentes de apps y plataformas digitales — Netflix, HBO Max, Spotify, Duolingo, Google One, ChatGPT, Claude, etc.
+{REGLAS_CATEGORIAS}
 
 Reglas IMPORTANTES para Pasajes:
 - Si el gasto es transporte, "categoria" es SIEMPRE "Pasajes".
 - Si "categoria" es "Pasajes", en "subcategoria" debes poner: Moto, Taxi, Micro o Metro.
-- Si menciona "metro", "categoria" es Pasajes, "subcategoria" es Metro y "metodo" es Tarjeta de metro.
 - Para CUALQUIER OTRA categoría que no sea Pasajes, "subcategoria" SIEMPRE es "No aplica".
 
 Otras reglas:
 - Si menciona "yape" o "bcp" → metodo: Bcp / Yape
-- Si el gasto es para una mascota → siempre Perrihijos
-- Si es un servicio digital recurrente → siempre Suscripciones
-- Si hay duda entre Gustos e Innecesario → usa Gustos por defecto
-- Si hay duda entre Familia y Salidas → si salieron juntos usa Salidas, si compró algo para un familiar usa Familia
-- Si es una comida personal → siempre Alimentación
 - Si menciona "plin" o "bbva" → metodo: BBVA / Plin
 - Si es imagen de boleta, extrae el total y el tipo de negocio. """
-
 
 PROMPT_CORRECCION = """El usuario quiere corregir datos de un egreso.
 Tienes los datos actuales y el mensaje del usuario indicando qué cambiar.
 Responde SOLO con el JSON corregido completo, sin texto extra, sin backticks."""
 
-PROMPT_CHAT = """Eres un asistente financiero personal amigable llamado FinBot.
+PROMPT_CHAT = """Eres un asistente financiero personal amigable.
 Ayudas a registrar egresos y consultar saldos por WhatsApp.
 El usuario te está enviando un mensaje casual o de cortesía.
 Responde de forma corta, amigable y natural. No uses más de 2 líneas.
 No inventes información financiera.
-Si pregunta qué puedes hacer, explica brevemente:
-- Registrar egresos
-- Consultar saldo y dinero disponible
-- Ver egresos de hoy, ayer, esta semana o por fecha
-- Consultar egresos por categoría"""
+Si pregunta qué puedes hacer, explica brevemente tus funciones de registro y consulta de saldo."""
 
 def get_prompt_intencion():
     hoy = datetime.now()
@@ -180,15 +162,14 @@ Intenciones posibles:
 - CONSULTAR_EGRESO_SEMANA: quiere saber cuánto gastó esta semana
 - CONSULTAR_EGRESO_FECHA: quiere saber cuánto gastó en una fecha específica
 - CONSULTAR_EGRESO_MAYOR: quiere saber cuál fue su egreso más grande
-- CONSULTAR_EGRESO_CATEGORIA: quiere saber cuánto gastó en una categoría específica (por ejemplo si en el mensaje menciona "cuánto gasté en alimentación", la categoría sería "Alimentación")
+- CONSULTAR_EGRESO_CATEGORIA: quiere saber cuánto gastó en una categoría específica
 - CHAT_CASUAL: saludo, agradecimiento, confirmación, conversación general
 
 Para CONSULTAR_EGRESO_CATEGORIA: en "categoria" pon el nombre exacto de la categoría.
 Para CONSULTAR_EGRESO_FECHA: en "fecha" pon la fecha en formato DD/MM/YYYY.
-Hoy es {hoy.strftime("%d/%m/%Y")} ({dia_semana}). Si el usuario dice "el lunes", "el martes", etc., calcula la fecha exacta de ese día en la semana actual o la anterior.
-En otros casos pon null en "fecha" y "categoria".
+Hoy es {hoy.strftime("%d/%m/%Y")} ({dia_semana}). 
 
-Categorías válidas: Alimentación, Amigos, Caridad, Dios, Familia, Gastos hormiga, Gastos innecesario, Gustos, Inversión en mí, Pago servicio, Pasajes, Perrihijos, Salidas, Suscripciones"""
+Categorías válidas: {', '.join(CATEGORIAS_VALIDAS)}"""
 
 # -------------------------------------------------------
 # LLAMADA A IA
@@ -275,14 +256,12 @@ def guardar_egreso(datos):
     fecha_hoy = datetime.now().strftime("%d/%m/%Y")
     fecha_gasto = datos.get("fecha", fecha_hoy)
 
-    # Escribe Descripción(B), Monto(C), Fecha(D)
     ws.update([[
         datos.get("descripcion", ""),
         datos['cantidad'],
         fecha_gasto,
     ]], f"B{nueva_fila}:D{nueva_fila}", value_input_option="USER_ENTERED")
     
-    # Escribe Categoría Nivel 2(G), Sub-categoría(H), Método(I)
     ws.update([[
         datos.get("categoria", "Otros"),
         datos.get("subcategoria", "No aplica"),
@@ -297,17 +276,18 @@ def guardar_egreso(datos):
 
 def obtener_saldos():
     ws = get_sheet("Resumen")
+    # Usa las celdas mapeadas en el config.json, con fallbacks de seguridad
     return {
-        "efectivo":    ws.acell("C4").value,
-        "bcp_yape":    ws.acell("D4").value,
-        "bbva_plin":   ws.acell("C6").value,
-        "metro":       ws.acell("D6").value,
-        "interbank":   ws.acell("D8").value,
-        "ahorros":     ws.acell("C12").value,
-        "prestamos":   ws.acell("D10").value,
-        "tarjeta":     ws.acell("C14").value,
-        "total_pagos": ws.acell("D18").value,
-        "gasto_mes":   ws.acell("A6").value,
+        "efectivo":    ws.acell(CELDAS_SALDO.get("efectivo", "C4")).value,
+        "bcp_yape":    ws.acell(CELDAS_SALDO.get("bcp_yape", "D4")).value,
+        "bbva_plin":   ws.acell(CELDAS_SALDO.get("bbva_plin", "C6")).value,
+        "metro":       ws.acell(CELDAS_SALDO.get("metro", "D6")).value,
+        "interbank":   ws.acell(CELDAS_SALDO.get("interbank", "D8")).value,
+        "ahorros":     ws.acell(CELDAS_SALDO.get("ahorros", "C12")).value,
+        "prestamos":   ws.acell(CELDAS_SALDO.get("prestamos", "D10")).value,
+        "tarjeta":     ws.acell(CELDAS_SALDO.get("tarjeta", "C14")).value,
+        "total_pagos": ws.acell(CELDAS_SALDO.get("total_pagos", "D18")).value,
+        "gasto_mes":   ws.acell(CELDAS_SALDO.get("gasto_mes", "A6")).value,
     }
 
 def respuesta_desglose(s):
@@ -332,12 +312,12 @@ def obtener_filas_egresos():
     todos = ws.get_all_values()
     filas = []
     for fila in todos[1:]:
-        if len(fila) < 7: # Asegura que la fila tenga al menos hasta la col G
+        if len(fila) < 7:
             continue
-        descripcion = fila[1].strip() # Columna B
-        cantidad    = fila[2].strip() # Columna C
-        fecha       = fila[3].strip() # Columna D
-        categoria   = fila[6].strip() # Columna G (Categoría Nivel 2)
+        descripcion = fila[1].strip()
+        cantidad    = fila[2].strip()
+        fecha       = fila[3].strip()
+        categoria   = fila[6].strip()
         
         if not cantidad or not fecha or not descripcion:
             continue
@@ -470,20 +450,27 @@ def resumen_egresos(datos):
 # -------------------------------------------------------
 
 def enviar_whatsapp(remitente, mensaje, tiempo_inicio=None):
-    twilio_client = TwilioClient(
-        os.getenv("TWILIO_ACCOUNT_SID"),
-        os.getenv("TWILIO_AUTH_TOKEN")
-    )
-    twilio_client.messages.create(
-        from_=os.getenv("TWILIO_SANDBOX_NUMBER"),
-        to=remitente,
-        body=mensaje
-    )
+    # --- COMENTAMOS ESTO PARA PRUEBAS LOCALES ---
+    #twilio_client = TwilioClient(
+    #    os.getenv("TWILIO_ACCOUNT_SID"),
+    #    os.getenv("TWILIO_AUTH_TOKEN")
+    #)
+    #twilio_client.messages.create(
+    #    from_=os.getenv("TWILIO_SANDBOX_NUMBER"),
+    #    to=remitente,
+    #    body=mensaje
+    #)
     if tiempo_inicio:
         segundos = (datetime.now() - tiempo_inicio).total_seconds()
         print(f">>> Enviado en {segundos:.1f}s: {mensaje[:50]}...")
     else:
         print(f">>> Enviado: {mensaje[:60]}...")
+
+    # --- DEJAMOS SOLO EL PRINT PARA VERLO EN LA TERMINAL ---
+    print(f"\n=========================================")
+    print(f"💬 MOCK WHATSAPP PARA {remitente}:")
+    print(mensaje)
+    print(f"=========================================\n")
 
 # -------------------------------------------------------
 # PROCESAMIENTO EN SEGUNDO PLANO
@@ -493,7 +480,6 @@ def procesar_mensaje(texto, media_url, media_type, remitente):
     texto_lower  = texto.lower().strip()
     tiempo_inicio = datetime.now()
     try:
-        # ── Usuario con estado pendiente ──
         if remitente in estados:
             estado = estados[remitente]
             tipo   = estado.get("tipo")
@@ -535,7 +521,7 @@ def procesar_mensaje(texto, media_url, media_type, remitente):
                         "No entendí cuál quieres ver. Responde:\n"
                         "1️⃣ Todo el desglose\n"
                         "2️⃣ Solo el total\n\n"
-                        "O escribe: efectivo, yape, bbva, metro, interbank, ahorros, tarjeta",
+                        "O escribe el método de pago.",
                         tiempo_inicio
                     )
                 return
@@ -563,7 +549,6 @@ def procesar_mensaje(texto, media_url, media_type, remitente):
                 estados[remitente]["datos"] = datos_corregidos
                 enviar_whatsapp(remitente, resumen_egresos(datos_corregidos), tiempo_inicio)
 
-        # ── Nuevo mensaje — detectar intención con IA ──
         else:
             print(">>> Detectando intención...")
             try:
@@ -571,7 +556,6 @@ def procesar_mensaje(texto, media_url, media_type, remitente):
                 intencion = intencion_raw.get("intencion", "REGISTRAR_EGRESO")
                 categoria = intencion_raw.get("categoria")
                 fecha     = intencion_raw.get("fecha")
-                print(f">>> Intención: {intencion} | Categoría: {categoria} | Fecha: {fecha}")
             except Exception as e:
                 print(f">>> Error detectando intención: {e} — asumiendo REGISTRAR_EGRESO")
                 intencion = "REGISTRAR_EGRESO"
@@ -596,8 +580,7 @@ def procesar_mensaje(texto, media_url, media_type, remitente):
                     "💰 ¿Qué quieres consultar?\n\n"
                     "1️⃣ Ver *todo* el desglose\n"
                     "2️⃣ Solo el *total disponible*\n\n"
-                    "O escribe directamente:\n"
-                    "efectivo · yape · bbva · metro · interbank · ahorros · tarjeta",
+                    "O escribe el método directamente",
                     tiempo_inicio
                 )
 
